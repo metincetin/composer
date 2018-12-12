@@ -99,7 +99,7 @@ var composer={
 			measure.addClef(clef)
 		measure.notes = [];
 		staff.currentOctave = clef=="treble"? 4:3;
-		
+		measure.tempo = 120
 		if (staff.measures.length == 0){
 		measure.voice = new VF.Voice({num_beats:4,beat_value:4});
 			staff.currentDuration = "q";
@@ -116,6 +116,8 @@ var composer={
 	}
 	,
 	render:function(code,staffIndex=0,postRender){
+
+		composer.data = [];
 
 		composer.staves[staffIndex].measures = [];
 		var staff = composer.staves[staffIndex];
@@ -161,6 +163,7 @@ var composer={
 			//changed octave
 			if ("0123456".includes(cmd) && cmd.length==1){
 				staff.currentOctave = parseInt(cmd);
+				composer.data.push({at:i,type:"i",message:"Changed octave",value:staff.currentOctave})
 			}
 
 			//octave goes up/down
@@ -170,8 +173,8 @@ var composer={
 						staff.currentOctave++;
 					if (char == "v" && staff.currentOctave>0)
 						staff.currentOctave--;
-
 				})
+				composer.data.push({at:i,type:"i",message:"Changed octave",value:staff.currentOctave})
 			}
 
 			//duration goes up/down
@@ -181,12 +184,21 @@ var composer={
 					staff.currentDuration = composer.utils.changeDuration(staff.currentDuration,char)
 				})
 				console.log("Duration changed. old: "+o+" new: "+staff.currentDuration)
+				composer.data.push({at:i,type:"i",message:"Changed duration",value:staff.currentDuration})
 
 			}
 			// key signature
 			if (cmd.startsWith("key:")){
 				var k = new Vex.Flow.KeySignature(cmd.split(":")[1]);
 				k.addToStave(composer.getLastMeasure(staff));
+				composer.data.push({at:i,type:"i",message:"Created new measure",value:""})
+
+			}
+			//tempo 
+			if (cmd.startsWith("tempo:")){
+				var tempo = cmd.split(":")[1];
+				composer.getLastMeasure(staff).tempo = parseInt(tempo);
+				composer.data.push({at:i,type:"i",message:"Set tempo",value:tempo})
 			}
 			//tuplets 
 			if (cmd.startsWith("[")){
@@ -205,15 +217,18 @@ var composer={
 				expecting = "";
 			}
 			
+			// ending group
 			if (cmd.startsWith(")") && inGroup){
 				console.log("Ending group creation")
 				inGroup = false;
 				// if we were in a tuplet, create it
 				if (inTuplet){
-					tuplets.push(new Vex.Flow.Tuplet(group, {}));
+					tuplets.push(new Vex.Flow.Tuplet(group, {notes_occupied: 1,ratioed:false}));
 					
 					inTuplet = false;
 					console.log("Ending the tuplet creation");
+					composer.data.push({at:i,type:"i",message:"Created tuplet",value:""})
+
 				}
 				if ("123456789".includes(cmd[cmd.length-1])){
 					console.log("Creating a group loop");
@@ -221,7 +236,7 @@ var composer={
 				group=[];
 			}
 			//changed duration
-			if ("qhw1/21/41/81/16/1/321/64".includes(cmd[0])){
+			/*if ("qhw1/21/41/81/16/1/321/64".includes(cmd[0])){
  
 				console.log("duration entered: "+cmd)
 				switch(cmd){
@@ -250,7 +265,7 @@ var composer={
 						staff.currentDuration = "64";
 					break;
 				}
-			}
+			}*/
 
 			//entered a note
 			if (cmd[0] != undefined && "abcdefg".includes(cmd[0].toLowerCase())){
@@ -261,7 +276,7 @@ var composer={
 				var keys = [];
 				var d = staff.currentDuration;
 
-				cmd.split("").forEach(function(note,index){                    
+				cmd.split("").forEach(function(note,index){
 					//octave number entered
 					if ("01234567".includes(note)){
 						keys[keys.length-1] = keys[keys.length-1].split("/")[0] + "/" +note;
@@ -306,7 +321,11 @@ var composer={
 				})
 				var vfNote = new VF.StaveNote({clef:composer.getLastMeasure(staff).clef,keys:tmpK,duration:d + (dotted? "d" : "")})
 				
-				
+				if (keys.length>1){
+					composer.data.push({at:i,type:"c",message:"Chord",value:keys.map(function(it){ return it.split("/")[0]}).join("")});
+				}else{
+					composer.data.push({at:i,type:"n",message:"Note",value:keys[0]});
+				}
 				
 				keys.forEach(function(key,index){
 					if (key.accidental!=""){
@@ -345,47 +364,164 @@ var composer={
 				//composer.utils.fillWithRests(composer.getLastMeasure(staff))
 				console.log("Added new measure")
 				composer.addMeasure(staff,composer.getLastMeasure(staff).clef)
+				composer.data.push({at:i,type:"i",message:"Created new measure",value:""});
+
 			}
 			
 
 			//rendering the stave in the end
 		}
-			if (composer.staves.length>0){
+		if (composer.staves.length>0){
 
-				context.clear();
+			context.clear();
 
-				composer.staves.forEach(function(st){
-					st.measures.forEach(function(measure,mIndex){
-						measure.setContext(context).draw()
-	
-	
-							//if (st.)
-	
-							//if (mIndex == 0) measure.addClef(measure.clef)
-							
+			composer.staves.forEach(function(st){
+				st.measures.forEach(function(measure,mIndex){
+					measure.setContext(context).draw()
 
-							measure.voice.clef = measure.clef;
 
-							console.log("Rendering")
-							composer.utils.fillWithRests(measure)
-							var beams = VF.Beam.generateBeams(measure.voice.tickables);
-							var formatter = new VF.Formatter().joinVoices([measure.voice]).format([measure.voice], 300);
-							
-							measure.voice.draw(context, measure);
-							beams.forEach(function(beam) {
-								beam.setContext(context).draw();
-							});
-							tuplets.forEach(function(tuplet){
-								tuplet.setContext(context).draw()
+						//if (st.)
+
+						//if (mIndex == 0) measure.addClef(measure.clef)
+						
+
+						measure.voice.clef = measure.clef;
+
+						console.log("Rendering")
+						composer.utils.fillWithRests(measure)
+						var beams = VF.Beam.generateBeams(measure.voice.tickables);
+						var formatter = new VF.Formatter().joinVoices([measure.voice]).format([measure.voice], 400);
+						
+						measure.voice.draw(context, measure);
+						
+						measure.voice.tickables.forEach(function(tickable){
+							tickable.attrs.el.addEventListener("click",function(click){
+								composer.visualizer.locate(tickable.stem.x_begin-12)
 							})
-							
-					})
-				})
+						})
 
-				postRender()
-			}
+
+						beams.forEach(function(beam) {
+							beam.setContext(context).draw();
+						});
+						tuplets.forEach(function(tuplet){
+							tuplet.setContext(context).draw()
+						})
+						
+				})
+			})
+			postRender()
+		}
 		
 
 
+	},
+	// holds the information
+	data:[
+
+	],
+	// visulization for playback and interaction
+	visualizer:{
+		enabled:true,
+		lineColor:"rgb(180,0,0)",
+		lineThickness:2,
+		locate:function(x,y){
+			composer.visualizer.draw()
+
+			composer.visualizer.line.x = x;
+			composer.visualizer.line.setAttribute("x1",x)
+			composer.visualizer.line.setAttribute("x2",x)
+			
+			if (y== undefined) return
+			composer.visualizer.line.y = y;
+			composer.visualizer.line.setAttribute("y1",y + 40)
+			composer.visualizer.line.setAttribute("y2",y+composer.staves[0].measures[0].height-10)
+		},
+		resize:function(h){
+			composer.visualizer.line.setAttribute("y2",h-10)
+		},
+		draw:function(){
+
+			if (composer.staves.length == 0) return;
+			if (composer.visualizer.line != undefined) return;
+			//<line x1="0" y1="0" x2="200" y2="200" style="stroke:rgb(255,0,0);stroke-width:2" />
+
+			composer.visualizer.line = document.createElementNS('http://www.w3.org/2000/svg','line');
+			composer.visualizer.line.setAttribute("x1",50)
+			composer.visualizer.line.setAttribute("x2",50)
+			composer.visualizer.line.x = 50
+			composer.visualizer.line.y = 25
+			composer.visualizer.line.setAttribute("y1",composer.staves[0].measures[0].y + 40)
+			composer.visualizer.line.setAttribute("y2",composer.staves[0].measures[0].y + composer.staves[0].measures[0].height - 10)
+			composer.visualizer.line.style = "stroke:"+composer.visualizer.lineColor+";stroke-width:"+composer.visualizer.lineThickness;
+
+			composer.visualizer.line.fitToStaves = function (){
+				composer.visualizer.resize(composer.getLastMeasure(composer.getLastStaff()).y + composer.getLastMeasure(composer.getLastStaff()).height); 
+			}
+
+			document.querySelector("#music svg").appendChild(composer.visualizer.line);
+			/*context.fillStyle = composer.visualizer.lineColor;
+			context.fillRect(composer.visualizer.linePosition.x,composer.visualizer.linePosition.y,composer.visualizer.lineThickness,10);*/
+		}
+	}
+	,
+	//playback engine for composer. Requires tone.js
+	playback:{
+		countdown:2000,
+		enabled:true,
+		init:function(){
+			composer.playback.synth = new Tone.PolySynth(6, Tone.Synth).toMaster();
+			composer.playback.audioContext = Object.create(Tone.context);
+			composer.playback.enabled = true
+		},
+		playNote:function(note){
+			if (Array.isArray(note)){
+				note.keys = note.keys.map(function(key){ return key.replace("/","")});
+			}else{
+				note = note.replace("/","");
+			}
+		},
+		play:function(){
+			if (!composer.playback.enabled) return;
+			
+
+			Tone.context = composer.playback.audioContext;
+
+
+			var currentWait;
+			composer.staves.forEach(function(staff,i){
+				staff.measures.forEach(function(measure,a){
+					var playedSoFar = Tone.Time(composer.playback.countdown / 1000);
+					Tone.Transport.bpm.value = measure.tempo
+					Tone.Transport.start("+0.1");
+					console.log(measure.voice.tickables[0])
+					measure.voice.tickables.forEach(function(note,noteIndex){
+						if (note.noteType != "r"){
+
+							console.log(Tone.Time(a+"m")+playedSoFar)
+							
+
+							setTimeout(function(){
+								console.log("playnote")
+								composer.visualizer.draw()
+								composer.visualizer.locate(note.stem.x_begin-5)
+							},(Tone.Time(a+"m") + playedSoFar)*Tone.Transport.bpm.value * 7.5)
+							composer.playback.synth.triggerAttackRelease(note.keys.map(function(x){ return x.replace("/","")}),VF.durationToNumber(note.duration)+"n",Tone.Time(a+"m")+playedSoFar)
+							
+							playedSoFar+=Tone.Time(VF.durationToNumber(note.duration)+"n")
+
+
+						}
+						/*setTimeout(function(){
+							composer.playback.synth.triggerAttackRelease(note.keys[0].replace("/",""),"4n")
+							currentWait += note.intrinsicTicks;
+						},currentWait * noteIndex);*/
+					})
+					console.log(playedSoFar*1000)
+
+				})
+			});
+			//composer.playback.synth.triggerAttackRelease('C4', '8n')
+		}
 	}
 }
